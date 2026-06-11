@@ -1613,7 +1613,6 @@
           this.angle = 0;
           this.walkPhase = 0;
           this.mode = "circle";
-          this.untilVisit = this.data.visitDelay;
           this.modeT = 0;
           this.fromNormal = new THREE.Vector3();
           this.toNormal = new THREE.Vector3();
@@ -1631,6 +1630,8 @@
           this.headYawCurrent = 0;
           this.walkAmountCurrent = 1;
           this.returnAngle = 0;
+          this.visitStartAngle = this.data.speed * this.data.visitDelay;
+          this.nextVisitAngle = this.visitStartAngle;
           this.fixedStopNormal = new THREE.Vector3();
           this.hasFixedStopNormal = false;
           this.smoothedForward = new THREE.Vector3();
@@ -1640,6 +1641,8 @@
           var dt = Math.min((deltaMs || 16) / 1000, 0.055);
           if (!this.defaultCameraReady) this.updateDefaultCameraVisitPoint();
           if (this.mode === "circle") this.angle += this.data.speed * dt;
+          var shouldStartVisit = this.mode === "circle" && this.angle >= this.nextVisitAngle;
+          if (shouldStartVisit) this.angle = this.nextVisitAngle;
 
           var circleNow = this.circleNormalAt(this.angle, this.currentNormal);
           var circleNext = this.circleNormalAt(this.angle + 0.075, this.nextNormal);
@@ -1647,8 +1650,7 @@
           var nextNormal = circleNext;
 
           if (this.mode === "circle") {
-            this.untilVisit -= dt;
-            if (this.untilVisit <= 0) {
+            if (shouldStartVisit) {
               this.mode = "toVisit";
               this.modeT = 0;
               this.fromNormal.copy(circleNow);
@@ -1702,24 +1704,29 @@
               normal = this.stopNormal;
               nextNormal = this.stopNormal;
             } else {
-              var leaveU = THREE.MathUtils.clamp(
+              var rawLeave = THREE.MathUtils.clamp(
                 (this.modeT - headLowerTime) / leaveTravelTime,
                 0,
                 1
               );
+              var leaveU = this.accelRamp01(rawLeave, 0.32);
+              var lookAheadU = this.accelRamp01(Math.min(1, rawLeave + 0.018), 0.32);
               var returnNext = this.circleNormalAt(this.returnAngle + 0.075, this.nextNormal);
               normal = this.slerpNormals(this.fromNormal, this.toNormal, leaveU, this.currentNormal);
               nextNormal = this.slerpNormals(
                 this.fromNormal,
                 returnNext,
-                Math.min(1, leaveU + 0.015),
+                lookAheadU,
                 this.nextNormal
               );
             }
             if (this.modeT >= this.data.visitTravelTime) {
               this.mode = "circle";
-              this.untilVisit = this.data.visitRepeatDelay;
               this.angle = this.returnAngle;
+              this.nextVisitAngle = this.forwardLoopAngle(
+                this.visitStartAngle,
+                this.angle + this.data.speed * this.data.visitRepeatDelay
+              );
               normal = this.circleNormalAt(this.angle, this.currentNormal);
               nextNormal = this.circleNormalAt(this.angle + 0.075, this.nextNormal);
             }
@@ -1732,12 +1739,18 @@
           } else if (this.mode === "hold") {
             walkAmountTarget = 0;
           } else if (this.mode === "toCircle") {
-            walkAmountTarget = this.ease01(
-              (this.modeT - this.data.headLowerTime) / (this.data.visitTravelTime * 0.34)
+            var leaveWalkTime = Math.max(0.2, this.data.visitTravelTime - this.data.headLowerTime);
+            var leaveWalkU = THREE.MathUtils.clamp(
+              (this.modeT - this.data.headLowerTime) / leaveWalkTime,
+              0,
+              1
             );
+            walkAmountTarget =
+              leaveWalkU <= 0 ? 0 : 0.22 + 0.78 * this.ease01(leaveWalkU);
           }
           this.walkAmountCurrent +=
-            (walkAmountTarget - this.walkAmountCurrent) * (1 - Math.exp(-3.2 * dt));
+            (walkAmountTarget - this.walkAmountCurrent) *
+            (1 - Math.exp(-(this.mode === "toCircle" ? 2.75 : 2.35) * dt));
           if (walkAmountTarget === 0 && this.walkAmountCurrent < 0.012) {
             this.walkAmountCurrent = 0;
           }
@@ -1808,13 +1821,13 @@
             } else if (this.mode === "hold") {
               lookAmount = 1;
             } else if (this.mode === "toCircle") {
-              lookAmount = 1 - this.ease01(this.modeT / this.data.headLowerTime);
+              lookAmount = 1 - this.ease01(this.modeT / (this.data.headLowerTime * 0.72));
             }
             var walkHeadYaw = Math.sin(this.angle * 1.45) * 18;
             var gazeHeadYaw = Math.sin(this.modeT * 0.42) * 2.7;
             var headYawTarget = walkHeadYaw * (1 - lookAmount) + gazeHeadYaw * lookAmount;
             var headPitchTarget = (29 + Math.sin(this.modeT * 0.48) * 1.15) * lookAmount;
-            var headBlend = 1 - Math.exp(-1.55 * dt);
+            var headBlend = 1 - Math.exp(-(this.mode === "toCircle" ? 4.6 : 1.55) * dt);
             this.headYawCurrent += (headYawTarget - this.headYawCurrent) * headBlend;
             this.headPitchCurrent += (headPitchTarget - this.headPitchCurrent) * headBlend;
             head.setAttribute("rotation", this.headPitchCurrent + " " + this.headYawCurrent + " 0");
@@ -1835,6 +1848,12 @@
         ease01: function (value) {
           var t = THREE.MathUtils.clamp(value, 0, 1);
           return t * t * t * (t * (t * 6 - 15) + 10);
+        },
+        accelRamp01: function (value, ramp) {
+          var t = THREE.MathUtils.clamp(value, 0, 1);
+          var r = THREE.MathUtils.clamp(ramp || 0.12, 0.001, 0.8);
+          var p = t < r ? (t * t) / (2 * r) : t - r * 0.5;
+          return p / (1 - r * 0.5);
         },
         forwardLoopAngle: function (angle, afterAngle) {
           var nextAngle = angle;
@@ -5569,6 +5588,31 @@
         ).normalize();
         createSunEdenSign(signNormal, new THREE.Vector3(0, 1.4, 19), -0.48);
 
+        var signTreeRandom = random;
+        random = makeRng(730519);
+        var signBackTreeOffsets = [
+          [-0.18, 0.18, 1.04],
+          [0.16, 0.2, 1.1],
+          [-0.05, 0.29, 0.96],
+          [0.27, 0.31, 0.92]
+        ];
+        for (var st = 0; st < signBackTreeOffsets.length; st++) {
+          var stLon = signLon + signBackTreeOffsets[st][0];
+          var stLat = THREE.MathUtils.clamp(
+            signLat + signBackTreeOffsets[st][1],
+            -1.35,
+            1.35
+          );
+          var stCos = Math.cos(stLat);
+          var stNormal = new THREE.Vector3(
+            Math.sin(stLon) * stCos,
+            Math.sin(stLat),
+            Math.cos(stLon) * stCos
+          ).normalize();
+          createTree(stNormal, signBackTreeOffsets[st][2]);
+        }
+        random = signTreeRandom;
+
         var flowerColors = ["#FF7AD9", "#FFE066", "#A9FF68", "#B98CFF", "#FF9F6E"];
         var flowerOffsets = [
           [-0.42, -0.16], [-0.28, 0.2], [-0.12, -0.26], [0.12, 0.22],
@@ -5608,12 +5652,12 @@
 
         /* Extra blooms ringing the SUN EDEN sign (offsets in lon/lat radians) */
         var signFlowerOffsets = [
-          [-0.09, 0.065], [0.09, 0.065], [-0.165, 0.025], [0.165, 0.025],
-          [-0.05, -0.115], [0.05, -0.115], [-0.235, -0.045], [0.235, -0.045],
-          [0, 0.138], [-0.115, 0.135], [0.115, 0.135], [-0.195, 0.105],
+          [-0.165, 0.025], [0.165, 0.025],
+          [-0.235, -0.045], [0.235, -0.045],
+          [-0.195, 0.105],
           [0.195, 0.105], [-0.075, -0.195], [0.075, -0.195], [-0.285, 0.035],
           [0.285, 0.035], [-0.035, -0.265], [0.035, -0.265], [-0.175, -0.155],
-          [0.175, -0.155], [-0.125, -0.085], [0.125, -0.085], [0, -0.155],
+          [0.175, -0.155],
           [-0.22, -0.12], [0.22, -0.12]
         ];
         for (var sf = 0; sf < signFlowerOffsets.length; sf++) {
@@ -7687,7 +7731,7 @@
       <!-- Static camera: original-style view, closer and flatter toward the house -->
       <a-entity
         position="-2.35 1.75 -4.5"
-        rotation="51 -4 12"
+        rotation="49.5 -4 12"
         camera="active: true; fov: 70; near: 0.01; far: 1000"
         curved-world-drag-look>
       </a-entity>
