@@ -4069,7 +4069,7 @@
           };
         }
 
-        function createTree(normal, scale) {
+        function createTree(normal, scale, skipAppend) {
           var tree = document.createElement("a-entity");
           var trunk = document.createElement("a-cylinder");
           var crown = document.createElement("a-sphere");
@@ -4126,6 +4126,7 @@
             }
             tree.appendChild(smokeA);
           }
+          if (skipAppend) return null;
           trees.appendChild(tree);
           placeYUpEntityOnPlanet(tree, normal, 0.02);
           return tree;
@@ -4192,46 +4193,22 @@
           return slerpUnitNormals(firstVisitStart, visitNormal, 0.73, target);
         }
 
-        function normalFromLonLat(longitude, latitude, target) {
-          var cosLat = Math.cos(latitude);
-          return target
-            .set(
-              Math.sin(longitude) * cosLat,
-              Math.sin(latitude),
-              Math.cos(longitude) * cosLat
-            )
-            .normalize();
-        }
+        function isFrontHouseRiverbankNoTreeZone(longitude, latitude) {
+          var lon = normalizeLonRad(longitude);
+          var dLongHouse = Math.abs(lon - houseLongitude);
+          dLongHouse = Math.min(dLongHouse, Math.PI * 2 - dLongHouse);
+          var riverLat = riverLatitude(lon);
+          var alongFrontBank =
+            dLongHouse < 0.55 &&
+            latitude > riverLat + 0.06 &&
+            latitude < riverLat + 0.52 &&
+            latitude < houseLatitude - 0.02;
 
-        function isNearCameraStopTreeClearing(normal) {
-          return (
-            cameraRiverbankTreeNormal &&
-            normal.distanceToSquared(cameraRiverbankTreeNormal) < 0.12
-          );
-        }
+          var dLongCameraBank = Math.abs(lon - 3.673);
+          dLongCameraBank = Math.min(dLongCameraBank, Math.PI * 2 - dLongCameraBank);
+          var nearCameraBank = dLongCameraBank < 0.42 && Math.abs(latitude - 0.389) < 0.38;
 
-        function normalAcrossRiverFrom(normal, target) {
-          var longitude = normalizeLonRad(Math.atan2(normal.x, normal.z));
-          var latitude = Math.asin(THREE.MathUtils.clamp(normal.y, -1, 1));
-          var riverLat = riverLatitude(longitude);
-          var side = latitude >= riverLat ? 1 : -1;
-          var bankGap = Math.max(Math.abs(latitude - riverLat), 0.16);
-          var newLatitude = THREE.MathUtils.clamp(
-            riverLat - side * (bankGap + 0.18),
-            -1.35,
-            1.35
-          );
-          return normalFromLonLat(longitude, newLatitude, target);
-        }
-
-        function trackCameraStopTreeCandidate(tree, normal) {
-          if (!tree || !isNearCameraStopTreeClearing(normal)) return;
-          var distSq = normal.distanceToSquared(cameraRiverbankTreeNormal);
-          if (distSq < cameraStopTreeBestDistSq) {
-            cameraStopTreeBestDistSq = distSq;
-            cameraStopTreeCandidate = tree;
-            cameraStopTreeCandidateNormal.copy(normal);
-          }
+          return alongFrontBank || nearCameraBank;
         }
 
         function createMountain(normal) {
@@ -7259,16 +7236,6 @@
           appendVegGardenChicken("outside", 94);
         }
 
-        var cameraRiverbankTreeNormal = normalFromLonLat(
-          3.673,
-          0.389,
-          new THREE.Vector3()
-        );
-        var cameraStopTreeCandidate = null;
-        var cameraStopTreeCandidateNormal = new THREE.Vector3();
-        var cameraStopTreeBestDistSq = Infinity;
-        var relocatedTreeNormal = new THREE.Vector3();
-
         var placed = [];
         var attempts = 0;
         while (placed.length < 260 && attempts < 10000) {
@@ -7308,7 +7275,11 @@
           if (inVegetableGardenClearing(longitude, latitude)) continue;
 
           var treeScale = 1.12 + random() * 0.48;
-          trackCameraStopTreeCandidate(createTree(normal, treeScale), normal);
+          createTree(
+            normal,
+            treeScale,
+            isFrontHouseRiverbankNoTreeZone(longitude, latitude)
+          );
           placed.push({ longitude: longitude, latitude: latitude });
         }
 
@@ -7359,18 +7330,14 @@
             if (inVegetableGardenClearing(lo, la)) continue;
 
             var fillTreeScale = 1.12 + random() * 0.48;
-            trackCameraStopTreeCandidate(createTree(nFill, fillTreeScale), nFill);
+            createTree(
+              nFill,
+              fillTreeScale,
+              isFrontHouseRiverbankNoTreeZone(lo, la)
+            );
             placed.push({ longitude: lo, latitude: la });
             fillPlaced++;
           }
-        }
-
-        if (cameraStopTreeCandidate) {
-          placeYUpEntityOnPlanet(
-            cameraStopTreeCandidate,
-            normalAcrossRiverFrom(cameraStopTreeCandidateNormal, relocatedTreeNormal),
-            0.02
-          );
         }
 
         createVegetableGardenInClearing(vegGardenNormal);
@@ -7719,8 +7686,8 @@
 
       <!-- Static camera: original-style view, closer and flatter toward the house -->
       <a-entity
-        position="-2.35 1.9 -4"
-        rotation="48 -4 12"
+        position="-2.35 1.75 -4.5"
+        rotation="51 -4 12"
         camera="active: true; fov: 70; near: 0.01; far: 1000"
         curved-world-drag-look>
       </a-entity>
