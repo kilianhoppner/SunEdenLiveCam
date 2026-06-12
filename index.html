@@ -6,6 +6,22 @@
     <title>Sun Eden</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <style>
+      @font-face {
+        font-family: "ABCDiatypeRoundedEdu";
+        src: url("./ABCDiatypeRoundedEdu-Light.otf") format("opentype");
+        font-weight: 300;
+        font-style: normal;
+        font-display: swap;
+      }
+
+      @font-face {
+        font-family: "ChicagoKare";
+        src: url("./ChicagoKare-Regular.otf") format("opentype");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+
       html,
       body {
         margin: 0;
@@ -16,8 +32,112 @@
       a-scene {
         display: block;
         height: 100%;
+        position: relative;
         width: 100%;
       }
+
+      .live-cam-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        pointer-events: none;
+      }
+
+      .live-cam-corner {
+        position: absolute;
+        width: clamp(42px, 4vmin, 78px);
+        height: clamp(42px, 4vmin, 78px);
+        border-color: #C9C9C9;
+        border-style: solid;
+        border-width: 0;
+      }
+
+      .live-cam-corner.top-left {
+        top: clamp(28px, 4vmin, 54px);
+        left: clamp(28px, 4vmin, 56px);
+        border-top-width: clamp(4px, 0.34vmin, 6px);
+        border-left-width: clamp(4px, 0.34vmin, 6px);
+      }
+
+      .live-cam-corner.top-right {
+        top: clamp(28px, 4vmin, 54px);
+        right: clamp(28px, 4vmin, 56px);
+        border-top-width: clamp(4px, 0.34vmin, 6px);
+        border-right-width: clamp(4px, 0.34vmin, 6px);
+      }
+
+      .live-cam-corner.bottom-left {
+        bottom: clamp(28px, 4vmin, 54px);
+        left: clamp(28px, 4vmin, 56px);
+        border-bottom-width: clamp(4px, 0.34vmin, 6px);
+        border-left-width: clamp(4px, 0.34vmin, 6px);
+      }
+
+      .live-cam-corner.bottom-right {
+        right: clamp(28px, 4vmin, 56px);
+        bottom: clamp(28px, 4vmin, 54px);
+        border-right-width: clamp(4px, 0.34vmin, 6px);
+        border-bottom-width: clamp(4px, 0.34vmin, 6px);
+      }
+
+      .live-cam-status {
+        position: absolute;
+        top: clamp(26px, 3.8vmin, 46px);
+        left: 50%;
+        display: flex;
+        align-items: center;
+        gap: clamp(10px, 1.16vmin, 16px);
+        transform: translateX(-50%);
+        color: #111111;
+        font-family: "ABCDiatypeRoundedEdu", Arial, sans-serif;
+        font-size: clamp(29px, 2.92vmin, 50px);
+        line-height: 1;
+        letter-spacing: 0;
+        white-space: nowrap;
+      }
+
+      .live-cam-status span:last-child {
+        transform: translateY(0.075em);
+      }
+
+      .live-cam-dot {
+        width: clamp(29px, 2.68vmin, 48px);
+        height: clamp(29px, 2.68vmin, 48px);
+        border-radius: 50%;
+        background: #FF1010;
+        animation: liveCamBlink 1.15s steps(2, start) infinite;
+        transform: translateY(1px);
+      }
+
+      @keyframes liveCamBlink {
+        0%,
+        52% {
+          opacity: 1;
+        }
+        53%,
+        100% {
+          opacity: 0.22;
+        }
+      }
+
+      .live-cam-time {
+        position: absolute;
+        top: calc(clamp(26px, 3.8vmin, 43px) + 2px);
+        right: clamp(150px, 9.8vw, 190px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: clamp(27px, 2.58vmin, 42px);
+        padding: 0 clamp(4px, 0.32vmin, 6px);
+        color: #FFFFFF;
+        background: #949494;
+        font-family: "ChicagoKare", "Courier New", monospace;
+        font-size: clamp(26px, 2.58vmin, 46px);
+        line-height: 1;
+        letter-spacing: 1px;
+        white-space: nowrap;
+      }
+
     </style>
 
     <!-- A-Frame -->
@@ -7135,6 +7255,282 @@
         createGlobePastureCow();
       });
     </script>
+    <script>
+      AFRAME.registerComponent("live-cam-vr-hud", {
+        init: function () {
+          this.depth = 1.65;
+          this.lastLayoutWidth = 0;
+          this.lastLayoutHeight = 0;
+          this.lastSecond = -1;
+          this.el.object3D.position.set(0, 0, -this.depth);
+
+          this.corners = [];
+          for (var i = 0; i < 8; i++) {
+            this.corners.push(this.makePlane("#C9C9C9"));
+          }
+
+          this.dot = document.createElement("a-circle");
+          this.dot.setAttribute("material", "shader: flat; color: #FF1010; side: double");
+          this.el.appendChild(this.dot);
+
+          this.liveText = document.createElement("a-entity");
+          this.liveText.setAttribute(
+            "troika-text",
+            "value: live cam; font: ./ABCDiatypeRoundedEdu-Light.otf; color: #111111; anchor: left; baseline: middle"
+          );
+          this.el.appendChild(this.liveText);
+
+          this.timeBox = this.makePlane("#949494");
+          this.timeText = document.createElement("a-entity");
+          this.timeText.setAttribute(
+            "troika-text",
+            "value: --/--/----  --:--:--; font: ./ChicagoKare-Regular.otf; color: #FFFFFF; anchor: center; baseline: middle"
+          );
+          this.el.appendChild(this.timeText);
+
+          this.updateLayout(true);
+          this.updateClock();
+        },
+        makePlane: function (color) {
+          var plane = document.createElement("a-plane");
+          plane.setAttribute("material", "shader: flat; color: " + color + "; side: double");
+          this.el.appendChild(plane);
+          return plane;
+        },
+        pad2: function (value) {
+          return String(value).padStart(2, "0");
+        },
+        ukTimeString: function () {
+          var parts = new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Europe/London",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false
+          }).formatToParts(new Date());
+          var values = {};
+          for (var i = 0; i < parts.length; i++) values[parts[i].type] = parts[i].value;
+          return (
+            values.day +
+            "/" +
+            values.month +
+            "/" +
+            values.year +
+            "  " +
+            this.pad2(values.hour) +
+            ":" +
+            this.pad2(values.minute) +
+            ":" +
+            this.pad2(values.second)
+          );
+        },
+        updateClock: function () {
+          if (!this.timeText) return;
+          this.timeText.setAttribute(
+            "troika-text",
+            "fontSize: " +
+              (this.timeFontSize || 0.04) +
+              "; value: " +
+              this.ukTimeString() +
+              "; font: ./ChicagoKare-Regular.otf; color: #FFFFFF; anchor: center; baseline: middle"
+          );
+        },
+        setPlane: function (plane, x, y, w, h) {
+          plane.setAttribute("position", x + " " + y + " 0");
+          plane.setAttribute("width", w);
+          plane.setAttribute("height", h);
+        },
+        cssRectToHud: function (rect, viewW, viewH, screenW, screenH) {
+          return {
+            x: (rect.left + rect.width / 2 - screenW / 2) / screenW * viewW,
+            y: (screenH / 2 - rect.top - rect.height / 2) / screenH * viewH,
+            w: rect.width / screenW * viewW,
+            h: rect.height / screenH * viewH
+          };
+        },
+        cssPointToHud: function (x, y, viewW, viewH, screenW, screenH) {
+          return {
+            x: (x - screenW / 2) / screenW * viewW,
+            y: (screenH / 2 - y) / screenH * viewH
+          };
+        },
+        updateLayout: function (force) {
+          var width = window.innerWidth || 16;
+          var height = window.innerHeight || 9;
+          if (
+            !force &&
+            Math.abs(width - this.lastLayoutWidth) < 1 &&
+            Math.abs(height - this.lastLayoutHeight) < 1
+          )
+            return;
+          this.lastLayoutWidth = width;
+          this.lastLayoutHeight = height;
+
+          var aspect = width / Math.max(1, height);
+          var fov = 70;
+          var cameraEl = this.el.parentElement;
+          if (cameraEl && cameraEl.getAttribute("camera")) {
+            fov = cameraEl.getAttribute("camera").fov || fov;
+          }
+          var viewH = 2 * Math.tan(THREE.MathUtils.degToRad(fov / 2)) * this.depth;
+          var viewW = viewH * aspect;
+          var cssCorners = [
+            document.querySelector(".live-cam-corner.top-left"),
+            document.querySelector(".live-cam-corner.top-right"),
+            document.querySelector(".live-cam-corner.bottom-left"),
+            document.querySelector(".live-cam-corner.bottom-right")
+          ];
+          var cssDot = document.querySelector(".live-cam-dot");
+          var cssLiveText = document.querySelector(".live-cam-status span:last-child");
+          var cssStatus = document.querySelector(".live-cam-status");
+          var cssTime = document.querySelector(".live-cam-time");
+          if (cssCorners[0] && cssCorners[1] && cssCorners[2] && cssCorners[3] && cssDot && cssLiveText && cssStatus && cssTime) {
+            var cornerIndex = 0;
+            for (var ci = 0; ci < cssCorners.length; ci++) {
+              var cEl = cssCorners[ci];
+              var cRect = cEl.getBoundingClientRect();
+              var cStyle = window.getComputedStyle(cEl);
+              var bt = parseFloat(cStyle.borderTopWidth) || 0;
+              var br = parseFloat(cStyle.borderRightWidth) || 0;
+              var bb = parseFloat(cStyle.borderBottomWidth) || 0;
+              var bl = parseFloat(cStyle.borderLeftWidth) || 0;
+              var isTop = cEl.classList.contains("top-left") || cEl.classList.contains("top-right");
+              var isLeft = cEl.classList.contains("top-left") || cEl.classList.contains("bottom-left");
+              var hPx = isTop ? bt : bb;
+              var vPx = isLeft ? bl : br;
+              var hY = isTop ? cRect.top + hPx / 2 : cRect.bottom - hPx / 2;
+              var vX = isLeft ? cRect.left + vPx / 2 : cRect.right - vPx / 2;
+              var hCenter = this.cssPointToHud(cRect.left + cRect.width / 2, hY, viewW, viewH, width, height);
+              var vCenter = this.cssPointToHud(vX, cRect.top + cRect.height / 2, viewW, viewH, width, height);
+              this.setPlane(
+                this.corners[cornerIndex++],
+                hCenter.x,
+                hCenter.y,
+                cRect.width / width * viewW,
+                Math.max(0.001, hPx / height * viewH)
+              );
+              this.setPlane(
+                this.corners[cornerIndex++],
+                vCenter.x,
+                vCenter.y,
+                Math.max(0.001, vPx / width * viewW),
+                cRect.height / height * viewH
+              );
+            }
+
+            var dotRect = cssDot.getBoundingClientRect();
+            var dotCenter = this.cssPointToHud(
+              dotRect.left + dotRect.width / 2,
+              dotRect.top + dotRect.height / 2,
+              viewW,
+              viewH,
+              width,
+              height
+            );
+            this.dot.setAttribute("radius", Math.min(dotRect.width / width * viewW, dotRect.height / height * viewH) / 2);
+            this.dot.setAttribute("position", dotCenter.x + " " + dotCenter.y + " 0.002");
+
+            var liveRect = cssLiveText.getBoundingClientRect();
+            var liveStyle = window.getComputedStyle(cssStatus);
+            var liveFontSize = (parseFloat(liveStyle.fontSize) || 28) / height * viewH;
+            var livePoint = this.cssPointToHud(
+              liveRect.left,
+              liveRect.top + liveRect.height / 2,
+              viewW,
+              viewH,
+              width,
+              height
+            );
+            this.liveText.setAttribute("position", livePoint.x + " " + livePoint.y + " 0.002");
+            this.liveText.setAttribute(
+              "troika-text",
+              "fontSize: " +
+                liveFontSize +
+                "; value: live cam; font: ./ABCDiatypeRoundedEdu-Light.otf; color: #111111; anchor: left; baseline: middle"
+            );
+
+            var timeRect = cssTime.getBoundingClientRect();
+            var timeHud = this.cssRectToHud(timeRect, viewW, viewH, width, height);
+            var timeStyle = window.getComputedStyle(cssTime);
+            this.timeFontSize = (parseFloat(timeStyle.fontSize) || 28) / height * viewH;
+            this.setPlane(this.timeBox, timeHud.x, timeHud.y, timeHud.w, timeHud.h);
+            this.timeText.setAttribute(
+              "position",
+              timeHud.x + " " + (timeHud.y - this.timeFontSize * 0.075) + " 0.004"
+            );
+            this.timeText.setAttribute(
+              "troika-text",
+              "fontSize: " +
+                this.timeFontSize +
+                "; value: --/--/----  --:--:--; font: ./ChicagoKare-Regular.otf; color: #FFFFFF; anchor: center; baseline: middle"
+            );
+            return;
+          }
+
+          var pad = Math.max(0.115, Math.min(viewH, viewW) * 0.055);
+          var corner = Math.max(0.09, Math.min(viewH, viewW) * 0.072);
+          var thick = Math.max(0.0065, Math.min(viewH, viewW) * 0.0045);
+          var top = viewH / 2 - pad;
+          var bottom = -viewH / 2 + pad;
+          var left = -viewW / 2 + pad;
+          var right = viewW / 2 - pad;
+
+          this.setPlane(this.corners[0], left + corner / 2, top - thick / 2, corner, thick);
+          this.setPlane(this.corners[1], left + thick / 2, top - corner / 2, thick, corner);
+          this.setPlane(this.corners[2], right - corner / 2, top - thick / 2, corner, thick);
+          this.setPlane(this.corners[3], right - thick / 2, top - corner / 2, thick, corner);
+          this.setPlane(this.corners[4], left + corner / 2, bottom + thick / 2, corner, thick);
+          this.setPlane(this.corners[5], left + thick / 2, bottom + corner / 2, thick, corner);
+          this.setPlane(this.corners[6], right - corner / 2, bottom + thick / 2, corner, thick);
+          this.setPlane(this.corners[7], right - thick / 2, bottom + corner / 2, thick, corner);
+
+          var liveSize = Math.max(0.046, Math.min(viewH, viewW) * 0.033);
+          var dotR = liveSize * 0.44;
+          var timeSize = Math.max(0.04, Math.min(viewH, viewW) * 0.032);
+          this.timeFontSize = timeSize;
+          var boxW = timeSize * 8.65;
+          var boxH = timeSize * 1.18;
+          var statusY = top - thick / 2 - boxH / 2;
+          this.dot.setAttribute("radius", dotR);
+          this.dot.setAttribute("position", -liveSize * 1.85 + " " + statusY + " 0.002");
+          this.liveText.setAttribute(
+            "position",
+            -liveSize * 0.92 + " " + (statusY - liveSize * 0.03) + " 0.002"
+          );
+          this.liveText.setAttribute(
+            "troika-text",
+            "fontSize: " +
+              liveSize +
+              "; value: live cam; font: ./ABCDiatypeRoundedEdu-Light.otf; color: #111111; anchor: left; baseline: middle"
+          );
+
+          var timeX = Math.min(right - boxW / 2 - pad * 0.28, liveSize * 12.6);
+          this.setPlane(this.timeBox, timeX, statusY, boxW, boxH);
+          this.timeText.setAttribute("position", timeX + " " + (statusY - timeSize * 0.075) + " 0.004");
+          this.timeText.setAttribute(
+            "troika-text",
+            "fontSize: " +
+              timeSize +
+              "; value: --/--/----  --:--:--; font: ./ChicagoKare-Regular.otf; color: #FFFFFF; anchor: center; baseline: middle"
+          );
+        },
+        tick: function () {
+          this.updateLayout(false);
+          var nowSecond = Math.floor(Date.now() / 1000);
+          if (nowSecond !== this.lastSecond) {
+            this.lastSecond = nowSecond;
+            this.updateClock();
+          }
+          if (this.dot) {
+            var blink = nowSecond % 2 === 0 ? 1 : 0.24;
+            this.dot.setAttribute("material", "shader: flat; color: #FF1010; opacity: " + blink + "; transparent: true; side: double");
+          }
+        }
+      });
+    </script>
   </head>
 
   <body>
@@ -7379,7 +7775,89 @@
         rotation="49.5 -4 12"
         camera="active: true; fov: 70; near: 0.01; far: 1000"
         curved-world-drag-look>
+        <a-entity id="liveCamVrHud" visible="false" live-cam-vr-hud></a-entity>
       </a-entity>
+
+      <div class="live-cam-overlay" aria-hidden="true">
+        <div class="live-cam-corner top-left"></div>
+        <div class="live-cam-corner top-right"></div>
+        <div class="live-cam-corner bottom-left"></div>
+        <div class="live-cam-corner bottom-right"></div>
+        <div class="live-cam-status">
+          <span class="live-cam-dot"></span>
+          <span>live cam</span>
+        </div>
+        <div id="liveCamTime" class="live-cam-time">--/--/---- --:--:--</div>
+      </div>
     </a-scene>
+
+    <script>
+      (function () {
+        var liveCamTime = document.getElementById("liveCamTime");
+        var liveCamOverlay = document.querySelector(".live-cam-overlay");
+        var sceneEl = document.querySelector("a-scene");
+        var liveCamVrHud = document.getElementById("liveCamVrHud");
+        if (!liveCamTime) return;
+
+        function pad2(value) {
+          return String(value).padStart(2, "0");
+        }
+
+        function updateLiveCamTime() {
+          var parts = new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Europe/London",
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false
+          }).formatToParts(new Date());
+          var values = {};
+          for (var i = 0; i < parts.length; i++) {
+            values[parts[i].type] = parts[i].value;
+          }
+          liveCamTime.textContent =
+            values.day +
+            "/" +
+            values.month +
+            "/" +
+            values.year +
+            "  " +
+            pad2(values.hour) +
+            ":" +
+            pad2(values.minute) +
+            ":" +
+            pad2(values.second);
+        }
+
+        updateLiveCamTime();
+        setInterval(updateLiveCamTime, 1000);
+
+        function syncLiveCamOverlayMode() {
+          var useVrHud =
+            !!(sceneEl && sceneEl.is && sceneEl.is("vr-mode"));
+          if (liveCamOverlay) liveCamOverlay.style.visibility = useVrHud ? "hidden" : "";
+          if (liveCamVrHud) liveCamVrHud.setAttribute("visible", useVrHud ? "true" : "false");
+        }
+
+        function syncLiveCamOverlayModeSoon() {
+          syncLiveCamOverlayMode();
+          setTimeout(syncLiveCamOverlayMode, 60);
+          setTimeout(syncLiveCamOverlayMode, 220);
+        }
+
+        syncLiveCamOverlayMode();
+        document.addEventListener("fullscreenchange", syncLiveCamOverlayMode);
+        document.addEventListener("webkitfullscreenchange", syncLiveCamOverlayMode);
+        document.addEventListener("mozfullscreenchange", syncLiveCamOverlayMode);
+        document.addEventListener("MSFullscreenChange", syncLiveCamOverlayMode);
+        if (sceneEl) {
+          sceneEl.addEventListener("enter-vr", syncLiveCamOverlayModeSoon);
+          sceneEl.addEventListener("exit-vr", syncLiveCamOverlayModeSoon);
+        }
+      })();
+    </script>
   </body>
 </html>
